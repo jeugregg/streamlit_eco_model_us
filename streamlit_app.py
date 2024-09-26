@@ -20,7 +20,7 @@ path_rate = "data/FEDFUNDS.csv"
 path_inflation = "data/CPIAUCSL_08_2024.csv"
 path_spx = "data/SP500_history.csv"
 ratio_test = 0.017
-
+list_class = ['-0.50','-0.25','0','0.25','0.5']
 
 MODE_TEST = True
 
@@ -42,6 +42,34 @@ def get_csv_data(my_path):
             print(f"No date format found in column 'date' for {my_path}")
     return df_csv
 
+@st.cache_data
+def add_shifted_columns(df, data_columns):
+    """
+    Adds shifted columns to the dataframe based on the specified data columns.
+    
+    Parameters:
+        df (pd.DataFrame): The original DataFrame.
+        data_columns (list): List of column names for which to create shifted columns.
+        
+    Returns:
+        pd.DataFrame: Updated DataFrame with additional shifted columns.
+    """
+    shift_count = 3
+    for col in data_columns:
+        for i in range(1, shift_count + 1):
+            df[f"{col}-{i}"] = df[col].shift(i)
+    
+    return df
+
+@st.cache_data
+def add_diff_columns(df, data_columns):
+    for col in data_columns:
+        shifted_cols = [f"{col}-{i}" for i in range(1, 4)]
+        df[f"{col}-1_diff"] = df[col] - df[shifted_cols[0]]
+        df[f"{col}-2_diff"] = df[shifted_cols[0]] - df[shifted_cols[1]]
+        df[f"{col}-3_diff"] = df[shifted_cols[1]] - df[shifted_cols[2]]
+    return df
+    
 # main
 st.title("US Economics model prediction")
 st.header("FEDFUNDS prediction", divider=True)
@@ -85,36 +113,17 @@ try:
     df["ff_higher_50"] = ff_higher_50
     df["ff_stable"] = ff_stable
 
-    # add last 3 month data about unemployment rate, inflation , fedfunds, SPX to df
-    # as new columns (i.e: "Total-1", "Total-2", "Total-3")
-    df["UNRATE-1"] = df["UNRATE"].shift(1)
-    df["UNRATE-2"] = df["UNRATE"].shift(2)
-    df["UNRATE-3"] = df["UNRATE"].shift(3)
+    # Assuming you have a DataFrame named `df` and the relevant columns are already loaded.
+    data_columns = ["UNRATE", "Inflation", "FEDFUNDS", "SPX_diff"]
 
-    df["Inflation-1"] = df["Inflation"].shift(1)
-    df["Inflation-2"] = df["Inflation"].shift(2)
-    df["Inflation-3"] = df["Inflation"].shift(3)
+    # Apply the function to add shifted columns
+    df = add_shifted_columns(df, data_columns)
 
-    df["fedfunds-1"] = df["FEDFUNDS"].shift(1)
-    df["fedfunds-2"] = df["FEDFUNDS"].shift(2)
-    df["fedfunds-3"] = df["FEDFUNDS"].shift(3)
+    # Now `df` contains the new shifted columns: UNRATE-1, UNRATE-2, UNRATE-3,
+    # Inflation-1, Inflation-2, Inflation-3, fedfunds-1, fedfunds-2, fedfunds-3,
 
-    df["spx-1"] = df["SPX_diff"].shift(1)
-    df["spx-2"] = df["SPX_diff"].shift(2)
-    df["spx-3"] = df["SPX_diff"].shift(3)
-
-    # diff : the difference between the current value and the previous value
-    df["UNRATE-1_diff"] = df["UNRATE"] - df["UNRATE-1"]
-    df["UNRATE-2_diff"] = df["UNRATE-1"] - df["UNRATE-2"]
-    df["UNRATE-3_diff"] = df["UNRATE-2"] - df["UNRATE-3"] 
-
-    df["Inflation-1_diff"] = df["Inflation"] - df["Inflation-1"]
-    df["Inflation-2_diff"] = df["Inflation-1"] - df["Inflation-2"]
-    df["Inflation-3_diff"] = df["Inflation-2"] - df["Inflation-3"]
-
-    df["fedfunds-1_diff"] = df["FEDFUNDS"] - df["fedfunds-1"]
-    df["fedfunds-2_diff"] = df["fedfunds-1"] - df["fedfunds-2"]
-    df["fedfunds-3_diff"] = df["fedfunds-2"] - df["fedfunds-3"]
+    # Call the function to add diff columns
+    df = add_diff_columns(df, data_columns)
 
     # inputs for prediction
     df_for_pred = df.iloc[-1:]
@@ -145,8 +154,8 @@ try:
         'UNRATE', 'Inflation', 'FEDFUNDS', 'SPX_diff', 'num_month',
         'UNRATE-1_diff', 'UNRATE-2_diff', 'UNRATE-3_diff',
         'Inflation-1_diff', 'Inflation-2_diff', 'Inflation-3_diff',
-        'fedfunds-1_diff', 'fedfunds-2_diff', 'fedfunds-3_diff',
-        'spx-1', 'spx-2', 'spx-3']
+        'FEDFUNDS-1_diff', 'FEDFUNDS-2_diff', 'FEDFUNDS-3_diff',
+        'SPX_diff-1', 'SPX_diff-2', 'SPX_diff-3']
 
     # Disp df
     st.subheader(f"TRAIN Inputs Data: {df_train.shape[0]} rows", divider=True)
@@ -180,12 +189,12 @@ try:
     df_range_max.rename_axis(index="Features", inplace=True)
     df_range_max.rename(columns={0: "max TEST", 1: "max TRAIN"}, inplace=True)
     df_range = df_range.join(df_range_max)
-
     try:
         assert df_min["pc_out_min"].max() < 5, "Some TEST features are not in Train !"
         assert df_max["pc_out_max"].max() < 5 , "Some TEST features are not in Train !"
         range_ok = True
-    except:
+    except AssertionError as e:
+        st.error(e)
         range_ok = False
     
     
@@ -211,7 +220,12 @@ try:
         divider=True,
     )
     df_class = df.copy()
-    def apply_class(class_num):
+    
+    df_class['classname'] = df_class['class'].apply(lambda x : list_class[int(x)])
+    '''def apply_class(class_num):
+        """
+        change num 2 string    
+        """
         if class_num == 0:
             return "-0.50"
         elif class_num == 1:
@@ -223,11 +237,12 @@ try:
         elif class_num == 4:
             return "0.5"
         else:
-            return None
+            return None'''
         
-    df_class["classname"] = df_class["class"].apply(apply_class)
+    #df_class["classname"] = df_class["class"].apply(apply_class)
+
     # to keep order in graph convert in categorical
-    df_class["classname"] = pd.Categorical(df_class['classname'], ['-0.50','-0.25','0','0.25','0.5'])
+    df_class["classname"] = pd.Categorical(df_class['classname'], list_class)
     g = sns.displot(
         df_class,
         x="classname",
